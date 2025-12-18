@@ -1,0 +1,6 @@
+.venv/
+build/
+output/
+__pycache__/
+
+DEV_NOTES.md
