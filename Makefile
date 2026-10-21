@@ -1,54 +1,67 @@
-# Directory paths
+# AeroSim Makefile
+# Targets:
+#   make        - build the simulator
+#   make run    - build + simulate with ARGS + plot the telemetry
+#   make test   - build and run the physics verification suite
+#   make clean  - remove build artifacts and outputs
+
 SRC_DIR = src
 INC_DIR = include
 OBJ_DIR = build
 OUT_DIR = output
 SCRIPT_DIR = scripts
 
-# Executable target
+# The test executable is built from test_physics.cpp only, so the main
+# target must not try to link it (it has its own main()).
+MAIN_SRCS = $(filter-out $(SRC_DIR)/test_physics.cpp,$(wildcard $(SRC_DIR)/*.cpp))
+MAIN_OBJS = $(MAIN_SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+TEST_SRC = $(SRC_DIR)/test_physics.cpp
+
 TARGET = $(OBJ_DIR)/aerosim
+TEST_TARGET = $(OBJ_DIR)/test_physics
 
-# Compiler and flags
 CXX = g++
-CXXFLAGS = -I$(INC_DIR) -Wall -Wextra -std=c++17 -O3
+CXXFLAGS = -I$(INC_DIR) -Wall -Wextra -std=c++17 -O2
 
-# Files
-SRCS = $(wildcard $(SRC_DIR)/*.cpp)
-OBJS = $(SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 PYTHON = ./.venv/bin/python3
-PLOT_SCRIPT = scripts/plot_results.py
+PLOT_SCRIPT = $(SCRIPT_DIR)/plot_results.py
 CSV = $(OUT_DIR)/flight_data.csv
 PNG = $(OUT_DIR)/flight_data.png
 
-# Arguments for the simulation
+# Extra arguments passed to the simulator, e.g.:
+#   make run ARGS="-m 80 -t 6000"
 ARGS =
-
-# --- RULES ---
 
 all: $(TARGET)
 
-# Compile the executable
-$(TARGET): $(OBJS)
+$(TARGET): $(MAIN_OBJS)
 	@mkdir -p $(OBJ_DIR)
-	@mkdir -p $(OUT_DIR)
-	$(CXX) $(OBJS) -o $(TARGET)
-	@echo "Compilation finished: $(TARGET)"
+	$(CXX) $(MAIN_OBJS) -o $@
+	@echo "Built simulator: $@"
 
-# Compile object files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Rule to run everything at once
-run: $(TARGET)
-	@echo "Launching simulation..."
-	./$(TARGET) ${ARGS}
-	@echo "Generating plot..."
-	$(PYTHON) $(PLOT_SCRIPT) $(CSV) $(PNG)
+# Physics verification suite: atmosphere tables, closed-form ballistics,
+# burnout time, Cd(M) continuity. See src/test_physics.cpp.
+test: $(TARGET) $(TEST_TARGET)
+	./$(TEST_TARGET)
 
-# Cleanup
+$(TEST_TARGET): $(TEST_SRC) $(TARGET)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INC_DIR) $(TEST_SRC) $(filter-out $(OBJ_DIR)/main.o,$(MAIN_OBJS)) -o $@
+	@echo "Built test suite: $@"
+
+run: $(TARGET)
+	@mkdir -p $(OUT_DIR)
+	@echo "Running simulation..."
+	./$(TARGET) $(ARGS)
+	@test -x "$(PYTHON)" || echo "Note: .venv/bin/python3 not found; skipping plot. Create it or run: python3 $(PLOT_SCRIPT) $(CSV) $(PNG)"
+	@if test -x "$(PYTHON)"; then $(PYTHON) $(PLOT_SCRIPT) $(CSV) $(PNG); fi
+
 clean:
 	rm -rf $(OBJ_DIR) $(OUT_DIR)
-	@echo "Directories build/ and output/ cleaned."
+	@echo "Cleaned build/ and output/."
 
-.PHONY: all clean run
+.PHONY: all run test clean
