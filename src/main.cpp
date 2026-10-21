@@ -1,172 +1,188 @@
-#include <iostream> // For console output
-#include <fstream>  // For file output (CSV)
-#include "../include/rocket.h" // Your class header
-#include "../include/constants.h" // Default constants
+/**
+ * @file main.cpp
+ * @brief AeroSim entry point: parse configuration, run the flight
+ *        simulation, write the telemetry CSV, and print a mission summary.
+ *
+ * PIPELINE
+ * --------
+ *   argv -> Config (config.h)
+ *        -> Atmosphere (US Standard 1976, atmosphere.h)
+ *        -> Rocket + semi-implicit Euler loop (rocket.h)
+ *        -> CSV telemetry (consumed by scripts/plot_results.py)
+ *        -> console mission summary (apogee, max Mach/q, burnout, ...)
+ *
+ * TERMINATION CONDITIONS
+ * ----------------------
+ * The loop stops when, in order:
+ *   1. the rocket lands (altitude returns to 0 with downward velocity),
+ *   2. the mission clock exceeds the safety cutoff (default 600 s),
+ *      which guards against parameter sets that never come down.
+ */
+
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <sys/stat.h>
+
+#include "config.h"
+#include "rocket.h"
+
+namespace {
+
+/// Create the parent directory of the output CSV if it does not exist.
+/// Uses POSIX mkdir; failure to create is not fatal (maybe stdout paths
+/// or an already-existing directory), the ofstream will tell us later.
+void ensureOutputDirectory(const std::string& csvPath) {
+    const size_t slash = csvPath.find_last_of('/');
+    if (slash == std::string::npos) {
+        return;
+    }
+    ::mkdir(csvPath.substr(0, slash).c_str(), 0755);
+}
+
+/// Write the CSV header. Column order matches scripts/plot_results.py.
+void writeCsvHeader(std::ofstream& out) {
+    out << "Time_s,Altitude_m,Velocity_mps,Acceleration_mps2,Mass_kg,Fuel_kg,"
+           "Mach,Drag_N,Thrust_N,DynamicPressure_Pa,Density_kgm3,DragCoefficient,"
+           "SpeedOfSound_mps,Phase\n";
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
-    std::cout << "--- AeroSim v1.0 ---" << std::endl;
-    std::cout << "Initializing simulation..." << std::endl;
+    std::cout << "--- AeroSim ---" << std::endl;
+    std::cout << "Vertical rocket flight simulator. Physics documented in docs/PHYSICS.md."
+              << std::endl;
 
-    // Default parameters
-    double dryMass = DEFAULT_DRY_MASS;
-    double thrust = DEFAULT_THRUST;
-    double fuel = DEFAULT_INITIAL_FUEL;
-    double dt = DEFAULT_DT;
-    double gravity = DEFAULT_GRAVITY;
-    double fuelConsumptionRate = DEFAULT_FUEL_CONSUMPTION_RATE;
-    double area = DEFAULT_AREA;
-    double dragCoeff = DEFAULT_DRAG_COEFFICIENT;
-
-    // Parsing command-line arguments
-    // Start at i = 1 because argv[0] is the program name
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-
-        if (arg == "-h" || arg == "--help") {
-            std::cout << "AeroSim Usage:" << std::endl;
-            std::cout << "  -m <value>    Set dry mass (kg)" << std::endl;
-            std::cout << "  -t <value>    Set thrust (N)" << std::endl;
-            std::cout << "  -f <value>    Set initial fuel mass (kg)" << std::endl;
-            std::cout << "  -dt <value>   Set time step (s)" << std::endl; 
-            std::cout << "  -g <value>    Set gravity (m/s^2)" << std::endl;
-            std::cout << "  -fc <value>   Set fuel consumption rate (kg/N/s)" << std::endl;
-            std::cout << "  -a <value>    Set cross-sectional area (m^2)" << std::endl;
-            std::cout << "  -cd <value>   Set drag coefficient" << std::endl;
-            return 0; // Exit after displaying help
-        }
-
-        // Check if the argument is a flag and if there is a value after it
-        if (arg[0] == '-' && i + 1 < argc) {
-            std::string value = argv[i + 1];
-            
-            if (arg == "-m") {
-                dryMass = std::stod(value);
-                if(dryMass < 0) {
-                    std::cerr << "Error: Dry mass (-m) cannot be negative." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-t") {
-                thrust = std::stod(value);
-                if(thrust < 0) {
-                    std::cerr << "Error: Thrust (-t) cannot be negative." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-f") {
-                fuel = std::stod(value);
-                if(fuel < 0) {
-                    std::cerr << "Error: Initial fuel mass (-f) cannot be negative." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-dt") {
-                dt = std::stod(value);
-                if(dt <= 0) {
-                    std::cerr << "Error: Time step (-dt) must be positive." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-g") {
-                gravity = std::stod(value);
-                if(gravity <= 0) {
-                    std::cerr << "Error: Gravity (-g) must be positive." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-fc") {
-                fuelConsumptionRate = std::stod(value);
-                if(fuelConsumptionRate < 0) {
-                    std::cerr << "Error: Fuel consumption rate (-fc) cannot be negative." << std::endl;
-                    return 1;
-                }
-            } else if (arg == "-a") {
-                area = std::stod(value);
-               if(area <= 0) {
-                    std::cerr << "Error: Cross-sectional area (-a) must be positive." << std::endl;
-                    return 1;
-                }              
-            } else if (arg == "-cd") {
-                dragCoeff = std::stod(value);
-                if(dragCoeff < 0) {
-                    std::cerr << "Error: Drag coefficient (-cd) cannot be negative." << std::endl;
-                    return 1;
-                }
-            } else {
-                std::cerr << "Warning: Unknown argument " << arg << " (Ignored)" << std::endl;
-            }
-            
-            // Skip the next element since we've just consumed it as a value
-            i++; 
-        }
+    const aerosim::ParseResult parsed = aerosim::parseCommandLine(argc, argv);
+    if (parsed.status == aerosim::ParseStatus::HelpShown) {
+        return 0;
     }
-
-    // Display for verification
-    std::cout << "AeroSim Configuration:" << std::endl;
-    std::cout << "  Dry Mass (-m): " << dryMass << " kg";
-    if(dryMass == DEFAULT_DRY_MASS) std::cout << " (Default)";
-    std::cout << std::endl;
-    std::cout << "  Thrust   (-t): " << thrust << " N";
-    if(thrust == DEFAULT_THRUST) std::cout << " (Default)";
-    std::cout << std::endl;
-    std::cout << "  Fuel     (-f): " << fuel << " kg";
-    if(fuel == DEFAULT_INITIAL_FUEL) std::cout << " (Default)";
-    std::cout << std::endl;
-    std::cout << "  Step     (-dt): " << dt << " s";
-    if(dt == DEFAULT_DT) std::cout << " (Default)";
-    std::cout << std::endl;
-    std::cout << "  Gravity  (-g): " << gravity << " m/s^2";
-    if(gravity == DEFAULT_GRAVITY) std::cout << " (Default)";
-    std::cout << std::endl;
-    std::cout << "  Fuel Consumption Rate (-fc): " << fuelConsumptionRate << " kg/N/s";
-    if(fuelConsumptionRate == DEFAULT_FUEL_CONSUMPTION_RATE) std::cout << " (Default)";
-    std::cout << std::endl;
-    if(area == DEFAULT_AREA) std::cout << "  Area     (-a): " << area << " m^2 (Default)" << std::endl;
-    else std::cout << "  Area     (-a): " << area << " m^2" << std::endl;
-    if(dragCoeff == DEFAULT_DRAG_COEFFICIENT) std::cout << "  Drag Coeff (-cd): " << dragCoeff << " (Default)" << std::endl;
-    else std::cout << "  Drag Coeff (-cd): " << dragCoeff << " " << std::endl;
-
-    // Instantiate the Rocket object
-    Rocket myRocket(dryMass, thrust, fuel, gravity, fuelConsumptionRate, area, dragCoeff);
-
-    // Data Logging Setup
-    std::ofstream dataFile("output/flight_data.csv");
-    if (!dataFile.is_open()) {
-        std::cerr << "Error: Could not open file for writing." << std::endl;
+    if (parsed.status == aerosim::ParseStatus::Error) {
         return 1;
     }
+    const aerosim::Config& cfg = parsed.config;
 
-    // Write CSV Header
-    dataFile << "Time,Altitude,Velocity,Fuel" << std::endl;
+    std::cout << "Configuration:\n"
+              << "  Dry mass                    : " << cfg.dryMass << " kg\n"
+              << "  Engine thrust               : " << cfg.thrust << " N\n"
+              << "  Initial propellant mass     : " << cfg.initialFuel << " kg\n"
+              << "  Specific fuel consumption   : " << cfg.specificFuelConsumption
+              << " kg/(N*s)  (effective exhaust velocity v_e = 1/sfc = "
+              << (cfg.specificFuelConsumption > 0.0 ? 1.0 / cfg.specificFuelConsumption : 0.0)
+              << " m/s)\n"
+              << "  Frontal reference area      : " << cfg.frontalArea << " m^2\n"
+              << "  Subsonic drag coefficient   : " << cfg.dragCoefficient << "\n"
+              << "  Gravity                     : " << cfg.gravity << " m/s^2\n"
+              << "  Integration time step      : " << cfg.timeStep << " s (semi-implicit Euler)\n"
+              << "  Atmosphere                  : US Standard Atmosphere 1976, layers 0-86 km\n"
+              << std::endl;
 
-    // Simulation Loop
-    double currentTime = 0.0;
-    const double MAX_SIM_TIME = 300.0; // Safety cutoff (5 minutes)
+    // Check the most basic feasibility criterion before simulating:
+    // thrust-to-weight ratio at ignition. Below 1 the rocket cannot
+    // lift off at all; we warn (and still run) because fuel drains and
+    // the ratio can cross 1 later only for unrealistic engines.
+    const double liftoffMass = cfg.dryMass + cfg.initialFuel;
+    const double thrustToWeight = cfg.thrust / (liftoffMass * cfg.gravity);
+    if (thrustToWeight <= 1.0) {
+        std::cerr << "Warning: thrust-to-weight ratio at ignition is " << thrustToWeight
+                  << " (<= 1). The rocket will not lift off." << std::endl;
+    }
 
-    std::cout << "Launch! Processing physics..." << std::endl;
+    const aerosim::Atmosphere atmosphere;
+    aerosim::Rocket rocket(cfg.dryMass, cfg.thrust, cfg.initialFuel, cfg.frontalArea,
+                           cfg.dragCoefficient, cfg.gravity, cfg.specificFuelConsumption);
 
-    while (currentTime < MAX_SIM_TIME) {
-        // Update Physics
-        myRocket.step(dt, Environment(gravity));
-        currentTime += dt;
+    ensureOutputDirectory(cfg.outputCsvPath);
+    std::ofstream csv(cfg.outputCsvPath);
+    if (!csv.is_open()) {
+        std::cerr << "Error: could not open '" << cfg.outputCsvPath << "' for writing."
+                  << std::endl;
+        return 1;
+    }
+    writeCsvHeader(csv);
 
-        // Log Data
-        dataFile << currentTime << "," 
-                 << myRocket.getPosition() << "," 
-                 << myRocket.getVelocity() << "," 
-                 << myRocket.getFuel() << std::endl;
+    // --- Simulation loop -------------------------------------------------
+    // Mission statistics tracked on the fly for the final summary.
+    double apogee = 0.0;
+    double apogeeTime = 0.0;
+    double maxSpeed = 0.0;
+    double maxMach = 0.0;
+    double maxDynamicPressure = 0.0;  // "max Q", the classic rocketry metric
+    double maxAcceleration = 0.0;
+    double touchdownTime = -1.0;
 
-        // Check Stop Conditions
-        // Stop if the rocket hits the ground AFTER launch (t > 1.0s)
-        if (myRocket.getPosition() <= 0.0 && currentTime > 1.0) {
-            std::cout << "Touchdown detected at t = " << currentTime << " s" << std::endl;
-            // Force altitude to 0 for clean data
-            dataFile << currentTime << ",0,0," << myRocket.getFuel() << std::endl;
+    std::cout << "Ignition. Running simulation..." << std::endl;
+
+    double t = 0.0;
+    aerosim::Telemetry lastTelemetry = rocket.telemetry(t, atmosphere);
+    csv << lastTelemetry.time << "," << lastTelemetry.altitude << "," << lastTelemetry.velocity
+        << "," << lastTelemetry.acceleration << "," << lastTelemetry.mass << ","
+        << lastTelemetry.fuel << "," << lastTelemetry.mach << "," << lastTelemetry.drag << ","
+        << lastTelemetry.thrust << "," << lastTelemetry.dynamicPressure << ","
+        << lastTelemetry.density << "," << lastTelemetry.dragCoefficient << ","
+        << lastTelemetry.speedOfSound << ","
+        << static_cast<int>(aerosim::FlightPhase::PreLaunch) << "\n";
+
+    while (t < cfg.maxSimulationTime) {
+        rocket.step(cfg.timeStep, atmosphere);
+        t += cfg.timeStep;
+
+        lastTelemetry = rocket.telemetry(t, atmosphere);
+
+        // Update mission statistics.
+        if (lastTelemetry.altitude > apogee) {
+            apogee = lastTelemetry.altitude;
+            apogeeTime = t;
+        }
+        maxSpeed = std::max(maxSpeed, std::abs(lastTelemetry.velocity));
+        maxMach = std::max(maxMach, lastTelemetry.mach);
+        maxDynamicPressure = std::max(maxDynamicPressure, lastTelemetry.dynamicPressure);
+        maxAcceleration = std::max(maxAcceleration, lastTelemetry.acceleration);
+
+        csv << lastTelemetry.time << "," << lastTelemetry.altitude << ","
+            << lastTelemetry.velocity << "," << lastTelemetry.acceleration << ","
+            << lastTelemetry.mass << "," << lastTelemetry.fuel << "," << lastTelemetry.mach
+            << "," << lastTelemetry.drag << "," << lastTelemetry.thrust << ","
+            << lastTelemetry.dynamicPressure << "," << lastTelemetry.density << ","
+            << lastTelemetry.dragCoefficient << "," << lastTelemetry.speedOfSound << ","
+            << static_cast<int>(rocket.phase()) << "\n";
+
+        // Landing: altitude back at zero with downward motion arrested
+        // by the ground clamp inside Rocket::step.
+        if (rocket.altitude() <= 0.0 && rocket.velocity() == 0.0 && t > cfg.timeStep) {
+            touchdownTime = t;
             break;
         }
     }
 
-    // Cleanup
-    dataFile.close();
-    std::cout << "Simulation finished. Data exported to 'flight_data.csv'." << std::endl;
+    csv.close();
 
-    std::cout << "--- Results ---" << std::endl;
-    std::cout << "Flight Time: " << currentTime << " s" << std::endl;
+    // --- Mission summary -------------------------------------------------
+    const double burnout = rocket.burnoutTime();
+    std::cout << "\n--- Mission summary ---" << std::endl;
+    std::cout << "  Apogee altitude           : " << apogee << " m at t = " << apogeeTime
+              << " s" << std::endl;
+    std::cout << "  Maximum speed             : " << maxSpeed << " m/s" << std::endl;
+    std::cout << "  Maximum Mach number       : " << maxMach << std::endl;
+    std::cout << "  Maximum dynamic pressure  : " << maxDynamicPressure << " Pa (max Q)"
+              << std::endl;
+    std::cout << "  Maximum acceleration      : " << maxAcceleration << " m/s^2 ("
+              << maxAcceleration / cfg.gravity << " g)" << std::endl;
+    if (burnout >= 0.0) {
+        std::cout << "  Propellant burnout        : t = " << burnout << " s" << std::endl;
+    } else {
+        std::cout << "  Propellant burnout        : not reached within the simulation" << std::endl;
+    }
+    if (touchdownTime > 0.0) {
+        std::cout << "  Touchdown                 : t = " << touchdownTime << " s" << std::endl;
+    } else {
+        std::cout << "  Touchdown                 : not reached before the safety cutoff ("
+                  << cfg.maxSimulationTime << " s)" << std::endl;
+    }
+    std::cout << "Telemetry written to '" << cfg.outputCsvPath << "'." << std::endl;
+    std::cout << "Plot it with: python3 scripts/plot_results.py <csv> <png>" << std::endl;
 
     return 0;
 }
