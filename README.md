@@ -53,13 +53,58 @@ Available arguments:
 | `-a` | Frontal area | m² |
 | `-cd` | Base drag coefficient | - |
 
+## ✈️ Aircraft Conceptual Design (PlaneDesign)
+
+A Raymer-based conceptual design tool: give it a few guesses (payload, range,
+stall speed, takeoff distance, climb rate, NACA airfoil...), it sizes
+everything else iteratively.
+
+```bash
+make design ARGS="-pay 180 -range 1000 -ar 8 -af 2412"
+```
+
+It performs:
+- **Weight sizing** (Raymer ch. 3): fixed-point iteration on W0 with the
+  empty-weight regression We/W0 = A·W0^c (Table 3.1) and mission fuel fractions
+  via Breguet range/endurance equations.
+- **NACA airfoils**: 4-digit, 5-digit and 6-series geometries with thin-airfoil
+  zero-lift angle and empirical CLmax.
+- **Drag buildup** (Raymer ch. 12): equivalent skin-friction method, Oswald
+  efficiency from AR (eq. 12.48).
+- **Constraint analysis** (Raymer ch. 5/18): required thrust/weight (or power/
+  weight for prop aircraft) vs wing loading for stall, takeoff over obstacle,
+  climb, cruise and sustained-turn requirements; exports a matching-style CSV.
+- **Lift & thrust sizing**: wing area from stall speed, thrust/power from the
+  governing performance constraint.
+
+Outputs a full design report to the console, `output/design_summary.csv` and
+`output/constraint_analysis.csv` (plots via `scripts/plot_design.py`).
+
+| Argument | Description | Unit |
+| :--- | :--- | :--- |
+| `-pay` | Payload | kg |
+| `-crew` | Crew weight | kg |
+| `-range` | Cruise range | km |
+| `-vc` | Cruise speed | m/s |
+| `-alt` | Cruise altitude | m |
+| `-end` | Loiter endurance | h |
+| `-vs` | Max stall speed | m/s |
+| `-to` | Takeoff distance (over 50 ft obstacle) | m |
+| `-roc` | Rate of climb at `-vcl` | m/s |
+| `-vmax` | Max level speed | m/s |
+| `-n` | Sustained-turn load factor (0 = skip) | - |
+| `-ar` | Wing aspect ratio | - |
+| `-af` | NACA airfoil (e.g. `2412`, `23012`, `63-209`, `64(2)215`) | - |
+| `-jet` | Jet propulsion (default: propeller) | - |
+| `-flap` | Takeoff flap CLmax increment | - |
+
 ## 📁 Project Structure
 
 ```text
 .
 ├── src/        # C++ source files
 ├── include/    # C++ headers
-├── scripts/    # Python script for visualization
+├── scripts/    # Python scripts for visualization
 ├── output/     # Flight data (CSV) and graphs (PNG)
 └── build/      # Object files and executable
 ```
