@@ -10,7 +10,7 @@ TARGET = $(OBJ_DIR)/aerosim
 
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -I$(INC_DIR) -Wall -Wextra -std=c++17 -O3
+CXXFLAGS = -I$(INC_DIR) -Wall -Wextra -std=c++17 -O3 -MMD -MP
 
 # Files
 SRCS = $(wildcard $(SRC_DIR)/*.cpp)
@@ -30,7 +30,11 @@ all: $(TARGET)
 
 # Compile the executable
 ROCKET_OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/environment.o $(OBJ_DIR)/rocket.o
-PLANE_OBJS = $(OBJ_DIR)/naca.o $(OBJ_DIR)/planedesign.o $(OBJ_DIR)/planedesign_main.o
+PLANE_OBJS = $(OBJ_DIR)/naca.o $(OBJ_DIR)/atmosphere.o $(OBJ_DIR)/geometry.o \
+             $(OBJ_DIR)/aero.o $(OBJ_DIR)/weights.o $(OBJ_DIR)/constraints.o \
+             $(OBJ_DIR)/engines.o $(OBJ_DIR)/performance.o $(OBJ_DIR)/synthesis.o \
+             $(OBJ_DIR)/trade.o $(OBJ_DIR)/design_main.o
+TEST_OBJS = $(PLANE_OBJS:$(OBJ_DIR)/design_main.o=$(OBJ_DIR)/tests.o)
 
 $(TARGET): $(ROCKET_OBJS)
 	@mkdir -p $(OBJ_DIR)
@@ -42,6 +46,14 @@ $(TARGET): $(ROCKET_OBJS)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Header dependencies
+DEPS = $(OBJS:.o=.d)
+-include $(DEPS)
+
+%.d: $(SRC_DIR)/%.cpp
+	@mkdir -p $(OBJ_DIR)
+	@$(CXX) $(CXXFLAGS) -MM -MT $(OBJ_DIR)/$*.o $< > $@
 
 # Rule to run everything at once
 run: $(TARGET)
@@ -55,12 +67,18 @@ design: $(PD_TARGET)
 	@mkdir -p $(OUT_DIR)
 	@echo "Running aircraft conceptual design..."
 	./$(PD_TARGET) ${ARGS}
-	@if [ -x "$(PYTHON)" ]; then $(PYTHON) scripts/plot_design.py $(OUT_DIR)/design_summary.csv $(OUT_DIR)/constraint_analysis.csv; else echo "Skipping plots: $(PYTHON) not found"; fi
+	@if [ -x "$(PYTHON)" ]; then $(PYTHON) scripts/plot_design.py $(OUT_DIR); else echo "Skipping plots: $(PYTHON) not found"; fi
 
 $(PD_TARGET): $(PLANE_OBJS)
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(PLANE_OBJS) -o $(PD_TARGET)
 	@echo "Built: $(PD_TARGET)"
+
+# Unit tests
+test: $(TEST_OBJS)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(TEST_OBJS) -o $(OBJ_DIR)/tests -lm
+	./$(OBJ_DIR)/tests
 
 # Cleanup
 clean:

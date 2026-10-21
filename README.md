@@ -55,48 +55,51 @@ Available arguments:
 
 ## ✈️ Aircraft Conceptual Design (PlaneDesign)
 
-A Raymer-based conceptual design tool: give it a few guesses (payload, range,
-stall speed, takeoff distance, climb rate, NACA airfoil...), it sizes
-everything else iteratively.
+A full Raymer-based conceptual design synthesis: give it a few guesses
+(payload, range, stall speed, takeoff distance, climb rate, NACA airfoil...),
+it iterates everything else to convergence in one damped fixed-point loop:
 
-```bash
-make design ARGS="-pay 180 -range 1000 -ar 8 -af 2412"
+```
+W0 → geometry → aerodynamics → constraint sizing → engine selection
+   → component weights → Breguet fuel → W0 (until closed)
 ```
 
-It performs:
-- **Weight sizing** (Raymer ch. 3): fixed-point iteration on W0 with the
-  empty-weight regression We/W0 = A·W0^c (Table 3.1) and mission fuel fractions
-  via Breguet range/endurance equations.
-- **NACA airfoils**: 4-digit, 5-digit and 6-series geometries with thin-airfoil
-  zero-lift angle and empirical CLmax.
-- **Drag buildup** (Raymer ch. 12): equivalent skin-friction method, Oswald
-  efficiency from AR (eq. 12.48).
-- **Constraint analysis** (Raymer ch. 5/18): required thrust/weight (or power/
-  weight for prop aircraft) vs wing loading for stall, takeoff over obstacle,
-  climb, cruise and sustained-turn requirements; exports a matching-style CSV.
-- **Lift & thrust sizing**: wing area from stall speed, thrust/power from the
-  governing performance constraint.
+```bash
+make design ARGS="-pay 180 -range 1000 -ar 8 -af 2412"   # single design
+make design ARGS="... -carpet"                            # + AR×W/S trade study
+make test                                                # 44 unit tests
+```
 
-Outputs a full design report to the console, `output/design_summary.csv` and
-`output/constraint_analysis.csv` (plots via `scripts/plot_design.py`).
+### Modules (`include/` + `src/`)
+| Module | Content |
+|---|---|
+| `naca` | NACA 4-digit / 5-digit / 6-series airfoils: exact mean line & thickness, thin-airfoil α_L0, empirical CLmax |
+| `atmosphere` | Full ISA (T, p, ρ, a, μ) to 20 km |
+| `geometry` | Fuselage from cabin sizing, tails from volume coefficients (Raymer ch. 6), wetted areas |
+| `aero` | Component drag buildup: Cf/FF/Q (Raymer ch. 12), flaps (plain→double-slot), gear drag, Korn Mdd compressibility, DATCOM 3D lift slope |
+| `weights` | Exact Raymer ch. 15.3.3 GA component equations (wing, fuselage, tails, gear, engine installed, fuel system, flight controls, avionics, electrical, furnishings), cross-checked against Table 3.1 |
+| `constraints` | One matching-chart line per requirement: takeoff over obstacle, climb, cruise, max speed, sustained turn, ceiling, stall cap |
+| `engines` | Off-the-shelf engine database (Rotax, Lycoming, Continental, PT6A...), automatic selection |
+| `performance` | Breguet range/endurance, best climb, service ceiling, V-n diagram, integrated takeoff & landing distances |
+| `synthesis` | The damped iteration loop closing weight, aero, power and fuel |
+| `trade` | Carpet study AR × W/S → minimum-W0 optimum (Raymer ch. 18-19) |
 
-| Argument | Description | Unit |
-| :--- | :--- | :--- |
-| `-pay` | Payload | kg |
-| `-crew` | Crew weight | kg |
-| `-range` | Cruise range | km |
-| `-vc` | Cruise speed | m/s |
-| `-alt` | Cruise altitude | m |
-| `-end` | Loiter endurance | h |
-| `-vs` | Max stall speed | m/s |
-| `-to` | Takeoff distance (over 50 ft obstacle) | m |
-| `-roc` | Rate of climb at `-vcl` | m/s |
-| `-vmax` | Max level speed | m/s |
-| `-n` | Sustained-turn load factor (0 = skip) | - |
-| `-ar` | Wing aspect ratio | - |
-| `-af` | NACA airfoil (e.g. `2412`, `23012`, `63-209`, `64(2)215`) | - |
-| `-jet` | Jet propulsion (default: propeller) | - |
-| `-flap` | Takeoff flap CLmax increment | - |
+### Outputs (`output/`)
+- `design_report.md` — full design report (weights table, geometry, aero, propulsion, predicted performance, convergence history)
+- `constraints.csv`, `weights.csv`, `carpet.csv` — data for plots
+- `matching_chart.png`, `weights.png`, `carpet.png` — via `scripts/plot_design.py` (needs `pandas`/`matplotlib`)
+
+### Key options
+`-pay` payload kg · `-range` km · `-vs` stall speed m/s · `-to` takeoff distance m ·
+`-roc` climb rate m/s · `-vmax` max speed m/s · `-ar` aspect ratio ·
+`-af` NACA airfoil · `-flap` plain|split|single|fowler|double ·
+`-jet` jet propulsion · `-retract` retractable gear · `-comp` composite airframe ·
+`-seats` · `-engines` · `-carpet` trade study · `-n` sustained turn g · `-ceil` service ceiling m
+
+Example — 2-seater, 1000 km, composite, Fowler flaps, optimum search:
+```bash
+make design ARGS="-pay 180 -range 1000 -seats 2 -comp -flap fowler -carpet"
+```
 
 ## 📁 Project Structure
 

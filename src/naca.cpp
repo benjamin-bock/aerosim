@@ -77,8 +77,7 @@ double NacaAirfoil::thicknessAt(double xc) const {
     double a0 = 0.2969, a1 = -0.1260, a2 = -0.3516, a3 = 0.2843;
     // Closed trailing edge variant (a4 = -0.1015); open TE uses -0.1036
     double a4 = -0.1015;
-    double t = tc_ / 0.20; // distribution normalized for t/c = 20%
-    return 5.0 * t * (a0 * std::sqrt(xc) + a1 * xc + a2 * xc * xc + a3 * xc * xc * xc + a4 * xc * xc * xc * xc);
+    return 5.0 * tc_ * (a0 * std::sqrt(xc) + a1 * xc + a2 * xc * xc + a3 * xc * xc * xc + a4 * xc * xc * xc * xc);
 }
 
 void NacaAirfoil::compute2DAero() {

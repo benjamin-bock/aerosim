@@ -1,52 +1,75 @@
+import sys
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
-import sys
 
-if len(sys.argv) < 3:
-    print("Usage: python plot_design.py <design_summary_csv> <constraint_csv>")
+if len(sys.argv) < 2:
+    print("Usage: python plot_design.py <output_dir>")
     sys.exit(1)
 
-summary_csv, constraint_csv = sys.argv[1], sys.argv[2]
+outdir = sys.argv[1]
+cons_csv = os.path.join(outdir, "constraints.csv")
+weights_csv = os.path.join(outdir, "weights.csv")
+carpet_csv = os.path.join(outdir, "carpet.csv")
 
-try:
-    summary = pd.read_csv(summary_csv)
-except FileNotFoundError:
-    print(f"Error: {summary_csv} not found.")
-    sys.exit(1)
+# --- Matching chart: required T/W & P/W vs wing loading, one line per constraint
+if os.path.exists(cons_csv):
+    cons = pd.read_csv(cons_csv)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    labels = cons['label'].unique()
+    colors = plt.cm.tab10(range(len(labels)))
+    cmap = dict(zip(labels, colors))
+    for lbl in labels:
+        sub = cons[(cons['label'] == lbl) & (cons['kind'] != 0)]
+        if sub.empty:
+            continue
+        ax1.plot(sub['ws'], sub['tw'], color=cmap[lbl], label=lbl)
+        ax2.plot(sub['ws'], sub['pw'], color=cmap[lbl], label=lbl)
+    stall = cons[cons['kind'] == 0]
+    if not stall.empty:
+        for ax in (ax1, ax2):
+            ax.axvline(float(stall['ws'].iloc[0]), color='red', linestyle='--', label='stall limit')
+    for ax, ylab in ((ax1, 'Required T/W'), (ax2, 'Required P/W [W/N]')):
+        ax.set_xlabel('Wing loading W/S [N/m²]')
+        ax.set_ylabel(ylab)
+        ax.grid(True)
+        ax.legend()
+    ax1.set_title('Matching chart (jet convention)')
+    ax2.set_title('Matching chart (prop convention)')
+    plt.tight_layout()
+    plt.savefig(os.path.join(outdir, "matching_chart.png"), dpi=150)
+    print(f"Saved {outdir}/matching_chart.png")
 
-try:
-    cons = pd.read_csv(constraint_csv)
-except FileNotFoundError:
-    print(f"Error: {constraint_csv} not found.")
-    sys.exit(1)
+# --- Weight breakdown pie
+if os.path.exists(weights_csv):
+    w = pd.read_csv(weights_csv)
+    w = w.dropna()
+    w = w[w['kg'] > 0]
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.pie(w['kg'], labels=w['component'], autopct='%1.1f%%', startangle=90)
+    ax.set_title('Weight breakdown')
+    plt.tight_layout()
+    plt.savefig(os.path.join(outdir, "weights.png"), dpi=150)
+    print(f"Saved {outdir}/weights.png")
 
-vals = dict(zip(summary['parameter'], summary['value']))
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-# Weight breakdown pie
-w0 = float(vals['W0'])
-we = float(vals['We'])
-wf = float(vals['Wf'])
-labels = ['Empty', 'Fuel', 'Payload+Crew']
-payload = w0 - we - wf
-ax1.pie([we, wf, max(payload, 0)], labels=labels, autopct='%1.1f%%', startangle=90)
-ax1.set_title(f"Weight breakdown - W0 = {w0:.0f} kg")
-
-# Constraint analysis: required P/W vs wing loading
-ok = cons[cons['constraint'] == 'ok']
-ax2.plot(ok['ws_N_m2'], ok['pw_required_W_kg'], color='blue', label='Required P/W')
-ax2.axhline(float(vals['power_required']) / w0, color='red', linestyle='--',
-           label='Design P/W')
-ax2.axvline(w0 * 9.81 / float(vals['wing_area']), color='green', linestyle=':',
-            label='Design W/S')
-ax2.set_xlabel('Wing loading W/S [N/m^2]')
-ax2.set_ylabel('Required P/W [W/kg]')
-ax2.grid(True)
-ax2.legend()
-ax2.set_title('Constraint analysis (prop-driven)')
-
-plt.tight_layout()
-out = summary_csv.replace('.csv', '.png')
-plt.savefig(out, dpi=150)
-print(f"Design plot saved to {out}")
+# --- Carpet plot: W0 contours over AR x W/S
+if os.path.exists(carpet_csv):
+    c = pd.read_csv(carpet_csv)
+    conv = c[c['converged'] == 1]
+    if not conv.empty:
+        fig, ax = plt.subplots(figsize=(10, 7))
+        ars = sorted(conv['ar'].unique())
+        for ar in ars:
+            sub = conv[conv['ar'] == ar].sort_values('ws')
+            ax.plot(sub['ws'], sub['w0_kg'], marker='o', label=f'AR={ar}')
+        best = conv.loc[conv['w0_kg'].idxmin()]
+        ax.plot(best['ws'], best['w0_kg'], 'r*', markersize=20,
+                label=f"optimum (AR={best['ar']:.0f}, W/S={best['ws']:.0f})")
+        ax.set_xlabel('Wing loading W/S [N/m²]')
+        ax.set_ylabel('Takeoff weight W0 [kg]')
+        ax.set_title('Trade study: W0 vs W/S for several aspect ratios')
+        ax.grid(True)
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(outdir, "carpet.png"), dpi=150)
+        print(f"Saved {outdir}/carpet.png")
