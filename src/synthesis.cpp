@@ -1,6 +1,7 @@
 #include <cmath>
 #include <algorithm>
 #include "../include/synthesis.h"
+#include "../include/stability.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -41,7 +42,8 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
 
         // 2) Aerodynamics
         AeroResult aero = aeroAnalysis(geo, foil, spec.cruiseSpeedMs, spec.cruiseAltM,
-                                        spec.flap, spec.flapChordFrac, spec.flapSpanFrac);
+                                        spec.flap, spec.flapChordFrac, spec.flapSpanFrac,
+                                        !spec.retractGear);
 
         // 3) Constraint set -> required power/thrust at this wing loading
         ConstraintSet cs;
@@ -88,7 +90,7 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
             if (spec.propDriven) {
                 double c = sfcEngine / 3.6e6; // kg/(W.s)
                 double ldBest = aero.ldMax;
-                double ld = std::max(ldCruise, 0.866 * ldBest);
+                double ld = std::max(ldCruise, 6.0); // actual cruise-point L/D (Breguet at constant V,CL)
                 mission *= std::exp(-spec.rangeKm * 1000.0 * G * c / (spec.propEff * ld));
                 if (spec.enduranceH > 0)
                     mission *= std::exp(-spec.enduranceH * 3600.0 * G * c
@@ -123,8 +125,18 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
         // 6) Convergence check on W0
         double w0New = wr.totalEmptyKg + spec.crewKg + spec.payloadKg + fuelNew;
         res.w0History.push_back(w0);
+        if (!std::isfinite(w0New) || w0New <= 0.0) {
+            // divergence guard: relax harder and reset to a sane value
+            w0 = 0.5 * (w0 + std::max(100.0, 0.5 * w0));
+            relax = std::max(0.2, relax * 0.5);
+            continue;
+        }
         double err = std::fabs(w0New - w0) / std::max(w0, 1.0);
         w0 = relax * w0New + (1.0 - relax) * w0;
+        // cap growth per iteration to avoid runaway fixed-point amplification
+        if (w0 > 2.0 * res.w0History.front() && w0 > 5000.0) {
+            relax = std::max(0.15, relax * 0.6);
+        }
         fuelKg = fuelNew;
         res.geo = geo;
         res.aero = aero;
@@ -162,6 +174,12 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
     pi.clmaxTO = res.aero.clmaxTakeoff;
     pi.clmaxLanding = res.aero.clmaxLanding;
     if (spec.propDriven) {
+        pi.usePropModel = true;
+        pi.rpm = 2500;
+        pi.prop.diameterM = Propeller::recommendedDiameter(res.powerKW, true);
+        pi.prop.variablePitch = res.powerKW > 100;
+    }
+    if (spec.propDriven) {
         int idx = selectEngine(res.powerKW, 1.0);
         if (idx >= 0) {
             res.engineIdx = idx;
@@ -169,5 +187,27 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
         }
     }
     res.perf = analyzePerformance(res.aero, res.geo, pi);
+
+    // Static stability & CG — position the wing so CG lands at ~28% MAC
+    StabilityInputs si;
+    si.payloadKg = spec.payloadKg;
+    si.crewKg = spec.crewKg;
+    si.fuelKg = fuelKg;
+    si.w0Kg = w0;
+    si.htVolumeCoeff = spec.htVolumeCoeff;
+    si.clAlphaWing = res.aero.clAlpha3D;
+    // Bisection on wing station for a target static margin of 12% MAC.
+    double lo = 0.15 * res.geo.fusLength, hi = 0.50 * res.geo.fusLength;
+    double smTarget = 0.12;
+    for (int k = 0; k < 25; ++k) {
+        double mid = 0.5 * (lo + hi);
+        si.xWingRootM = mid;
+        res.stab = stabilityAnalysis(res.geo, res.weights, si);
+        // static margin increases with wing station (np moves faster than cg)
+        if (res.stab.staticMargin < smTarget) lo = mid; else hi = mid;
+    }
+    si.xWingRootM = 0.5 * (lo + hi);
+    res.stab = stabilityAnalysis(res.geo, res.weights, si);
+    res.stab.wingRootM = si.xWingRootM;
     return res;
 }

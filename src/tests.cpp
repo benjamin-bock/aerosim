@@ -11,6 +11,8 @@
 #include "../include/engines.h"
 #include "../include/performance.h"
 #include "../include/synthesis.h"
+#include "../include/propeller.h"
+#include "../include/stability.h"
 
 static int failures = 0, tests = 0;
 
@@ -118,14 +120,46 @@ int main() {
     check(pr.takeoffDistM > 50 && pr.takeoffDistM < 1500, "takeoff distance plausible");
     check(pr.ceilingM > 2000, "service ceiling > 2000 m");
 
+    // --- Propeller
+    {
+        Propeller p; p.diameterM = 1.87; p.variablePitch = true;
+        check(p.efficiency(0.05) < 0.2, "eta small at low J");
+        checkNear(p.efficiency(0.85), 0.83, 0.06, "eta ~0.85 near peak J");
+        check(p.efficiency(1.6) < 0.1, "eta collapses beyond J=1.6");
+        check(p.staticThrust(150000) > 2000, "static thrust > 2 kN for 150 kW");
+        checkNear(Propeller::recommendedDiameter(120, true), 1.9, 0.08, "D~1.9m for 120kW");
+    }
+
+    // --- Stability
+    {
+        NacaAirfoil f2_("2412");
+        LayoutInputs li2; li2.nSeats = 4;
+        Geometry g2 = layoutAircraft(16.2, 7.5, 0.6, 0.0, f2_, li2);
+        WeightInputs wi2;
+        wi2.w0Kg = 1111; wi2.engineMassKg = 118; wi2.fuelKg = 115;
+        wi2.cruiseLD = 10; wi2.cruiseDynamicPressure = 1723;
+        WeightResult w2 = componentWeights(g2, wi2);
+        StabilityInputs si2;
+        si2.payloadKg = 200; si2.crewKg = 80; si2.fuelKg = 115; si2.w0Kg = 1111;
+        si2.xWingRootM = 1.6;
+        StabilityResult st2 = stabilityAnalysis(g2, w2, si2);
+        check(st2.cgM > 0.5 && st2.cgM < g2.fusLength, "CG inside fuselage");
+        check(st2.npM > st2.cgM, "neutral point aft of CG (stable)");
+        check(st2.staticMargin > 0.0 && st2.staticMargin < 0.6, "static margin positive and bounded");
+        // static margin grows with wing station
+        si2.xWingRootM = 2.2;
+        StabilityResult st3 = stabilityAnalysis(g2, w2, si2);
+        check(st3.staticMargin > st2.staticMargin, "SM increases with wing aft");
+    }
+
     // --- Synthesis: converges and closes the weight loop
     DesignSpec spec;
-    spec.payloadKg = 180; spec.rangeKm = 1000;
+    spec.payloadKg = 180; spec.rangeKm = 800;
     SynthesisResult sr = synthesizeDesign(spec);
     check(sr.converged, "synthesis converges");
     checkNear(sr.w0Kg, sr.weights.totalEmptyKg + spec.crewKg + spec.payloadKg + sr.wfKg, 0.02,
               "weight loop closes: W0 = We + crew + payload + fuel");
-    check(sr.wfKg / sr.w0Kg < 0.25, "fuel fraction < 25% for 1000 km mission");
+    check(sr.wfKg / sr.w0Kg < 0.25, "fuel fraction < 25% for default mission");
     check(sr.perf.rangeKm >= spec.rangeKm, "achieved range >= requirement");
 
     std::printf("\n%d/%d tests passed\n", tests - failures, tests);

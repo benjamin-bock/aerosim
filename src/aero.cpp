@@ -48,7 +48,8 @@ double gearDragArea(bool retract, double w0N) {
 
 AeroResult aeroAnalysis(const Geometry& g, const NacaAirfoil& foil,
                         double vCruise, double altCruise,
-                        FlapType flap, double flapChordFrac, double flapSpanFrac) {
+                        FlapType flap, double flapChordFrac, double flapSpanFrac,
+                        bool fixedGear) {
     AeroResult a;
 
     Atmosphere atm = isaAt(altCruise);
@@ -74,7 +75,8 @@ AeroResult aeroAnalysis(const Geometry& g, const NacaAirfoil& foil,
 
     // Fuselage form factor (Raymer 12.32): FF = 1 + 60/f^3 + f/400
     double f = std::max(g.fusFineness, 1.5);
-    double ffFus = 1.0 + 60.0 / std::pow(f, 3.0) + f / 400.0;
+    double ffFus = (1.0 + 60.0 / std::pow(f, 3.0) + f / 400.0);
+    ffFus *= 1.0 + 0.15 * std::pow(std::max(0.0, g.fusFineness - 6.0) / 4.0, 2.0); // upsweep/canopy penalty
     add("fuselage", g.swetFus, ffFus, 1.0);
 
     // Tails: like wing with t/c = 0.10
@@ -88,7 +90,15 @@ AeroResult aeroAnalysis(const Geometry& g, const NacaAirfoil& foil,
     // Miscellaneous: antennas, gaps, protrusions (Raymer: +2-5%)
     cd0 *= 1.03;
     // Nacelle/engine cooling & misc drag
-    cd0 += 0.0015;
+    cd0 += 0.003;
+    // Fixed landing gear: large parasite (Raymer 12.30; calibrated so that a
+    // Cessna-172-class design lands at CD0 ~ 0.032)
+    if (fixedGear)
+        cd0 += 0.0080 * std::sqrt(g.wingArea / 16.0);
+    // Wing struts & cabane (braced high-wing GA)
+    cd0 += 0.0025;
+    // Cowling/engine-cooling exit, wheel fairing imperfections
+    cd0 += 0.0010;
     // Compressibility (Mdd based)
     double mach = v / atm.soundSpeed;
     double mdd = 0.93 * (1.0 / std::sqrt(std::cos(g.sweepQC))) - 0.032 * g.thicknessRatio / std::cos(g.sweepQC) - 0.10; // Korn

@@ -10,18 +10,27 @@
 static const double G = 9.81;
 static const double RHO0 = 1.225;
 
-// Power available at speed (prop): P_avail = P_rated * eta * sigma^x (simple)
-static double powerAvailable(const PerformanceInputs& in, double altM) {
+// Shaft power available (before propeller): NA piston scales ~ sigma
+static double shaftPower(const PerformanceInputs& in, double altM) {
     double sigma = isaDensity(altM) / RHO0;
-    // NA piston: power ~ sigma (naturally aspirated)
-    return in.powerW * in.propEff * std::max(0.25, sigma);
+    return in.powerW * std::max(0.25, sigma);
 }
 
-// Thrust available at speed for prop: T = P*eta / V
+// Thrust available: constant-eta model or propeller eta = f(J) model
 static double thrustAvailable(const PerformanceInputs& in, double v, double altM) {
-    double vUse = std::max(v, 12.0);
-    if (in.propDriven) return powerAvailable(in, altM) / vUse;
     double sigma = isaDensity(altM) / RHO0;
+    if (in.propDriven) {
+        double pAlt = shaftPower(in, altM);
+        if (in.usePropModel) {
+            double n = std::max(in.rpm / 60.0, 5.0);
+            double J = std::max(v, 0.1) / (n * in.prop.diameterM);
+            double eta = in.prop.efficiency(J);
+            if (v < 8.0) return std::min(in.prop.staticThrust(pAlt), pAlt / 5.0);
+            return pAlt * eta / v;
+        }
+        double vUse = std::max(v, 12.0);
+        return pAlt * in.propEff / vUse;
+    }
     return in.thrustN * std::max(0.3, std::pow(sigma, 0.7));
 }
 

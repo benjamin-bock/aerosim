@@ -33,7 +33,8 @@ ROCKET_OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/environment.o $(OBJ_DIR)/rocket.o
 PLANE_OBJS = $(OBJ_DIR)/naca.o $(OBJ_DIR)/atmosphere.o $(OBJ_DIR)/geometry.o \
              $(OBJ_DIR)/aero.o $(OBJ_DIR)/weights.o $(OBJ_DIR)/constraints.o \
              $(OBJ_DIR)/engines.o $(OBJ_DIR)/performance.o $(OBJ_DIR)/synthesis.o \
-             $(OBJ_DIR)/trade.o $(OBJ_DIR)/design_main.o
+             $(OBJ_DIR)/trade.o $(OBJ_DIR)/design_main.o \
+             $(OBJ_DIR)/propeller.o $(OBJ_DIR)/stability.o
 TEST_OBJS = $(PLANE_OBJS:$(OBJ_DIR)/design_main.o=$(OBJ_DIR)/tests.o)
 
 $(TARGET): $(ROCKET_OBJS)
@@ -80,9 +81,15 @@ test: $(TEST_OBJS)
 	$(CXX) $(TEST_OBJS) -o $(OBJ_DIR)/tests -lm
 	./$(OBJ_DIR)/tests
 
+# Calibration against Cessna 172
+calibrate: $(OBJ_DIR)/calibration.o $(PLANE_OBJS:$(OBJ_DIR)/design_main.o=)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(filter-out $(OBJ_DIR)/design_main.o,$(PLANE_OBJS)) $(OBJ_DIR)/calibration.o -o $(OBJ_DIR)/calibrate -lm
+	./$(OBJ_DIR)/calibrate
+
 # Cleanup
 clean:
 	rm -rf $(OBJ_DIR) $(OUT_DIR)
 	@echo "Directories build/ and output/ cleaned."
 
-.PHONY: all clean run design
+.PHONY: all clean run design test calibrate

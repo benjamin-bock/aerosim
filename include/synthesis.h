@@ -13,6 +13,7 @@
 #include "constraints.h"
 #include "performance.h"
 #include "engines.h"
+#include "stability.h"
 
 struct SynthesisResult {
     bool converged = false;
@@ -26,6 +27,7 @@ struct SynthesisResult {
     AeroResult aero;
     WeightResult weights;
     PerformanceResult perf;
+    StabilityResult stab;
     ConstraintSet cset;
     int engineIdx = -1;
     std::vector<double> w0History;

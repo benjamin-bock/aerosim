@@ -38,7 +38,7 @@ struct ComponentDrag {
 AeroResult aeroAnalysis(const Geometry& g, const NacaAirfoil& foil,
                         double cruiseSpeed, double cruiseAlt,
                         FlapType flap, double flapChordFrac = 0.3,
-                        double flapSpanFrac = 0.6);
+                        double flapSpanFrac = 0.6, bool fixedGear = true);
 
 // Flap CLmax increment (Raymer Table 12.5 / ch. 12)
 double flapDeltaCLmax(FlapType t, double chordFrac, double spanFrac);

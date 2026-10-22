@@ -7,6 +7,7 @@
  * rate of climb, takeoff/landing distances, V-n diagram.
  */
 #include "aero.h"
+#include "propeller.h"
 
 struct PerformanceResult {
     double rangeKm = 0;          // achievable with available fuel
@@ -30,6 +31,9 @@ struct PerformanceInputs {
     double fuelKg = 120;
     double powerW = 150000;     // available shaft power
     double propEff = 0.8;
+    Propeller prop;               // propeller model (used if propEff <= 0)
+    bool usePropModel = false;    // eta = f(J) instead of constant
+    double rpm = 2500;
     double sfcKgPerkWh = 0.30;
     bool propDriven = true;
     double thrustN = 0;          // if jet

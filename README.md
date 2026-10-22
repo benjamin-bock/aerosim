@@ -65,10 +65,16 @@ W0 → geometry → aerodynamics → constraint sizing → engine selection
 ```
 
 ```bash
-make design ARGS="-pay 180 -range 1000 -ar 8 -af 2412"   # single design
-make design ARGS="... -carpet"                            # + AR×W/S trade study
-make test                                                # 44 unit tests
+make design ARGS="-pay 180 -range 800 -ar 8 -af 2412"   # single design
+make design ARGS="... -carpet"                           # + AR×W/S trade study
+make test                                               # 53 unit tests
+make calibrate                                          # validation vs Cessna 172
 ```
+
+**Validation**: the tool reproduces a Cessna 172 Skyhawk within:
+W0 +4.7%, wing area +7.2%, span +3.8%, power +13.5%, stall speed +3.7%,
+cruise L/D +16%, range +10% (reserve accounting), ceiling +33%,
+and selects the correct engine class (Lycoming).
 
 ### Modules (`include/` + `src/`)
 | Module | Content |
@@ -81,7 +87,9 @@ make test                                                # 44 unit tests
 | `constraints` | One matching-chart line per requirement: takeoff over obstacle, climb, cruise, max speed, sustained turn, ceiling, stall cap |
 | `engines` | Off-the-shelf engine database (Rotax, Lycoming, Continental, PT6A...), automatic selection |
 | `performance` | Breguet range/endurance, best climb, service ceiling, V-n diagram, integrated takeoff & landing distances |
-| `synthesis` | The damped iteration loop closing weight, aero, power and fuel |
+| `propeller` | eta = f(J) fit to Clark-Y charts, static thrust, diameter trend calibrated on real aircraft (C172/SR22/PT6A) |
+| `stability` | Component CG stations, aircraft CG, neutral point with downwash gradient, static margin; wing station solved by bisection for target SM |
+| `synthesis` | The damped iteration loop closing weight, aero, power, fuel AND balance |
 | `trade` | Carpet study AR × W/S → minimum-W0 optimum (Raymer ch. 18-19) |
 
 ### Outputs (`output/`)

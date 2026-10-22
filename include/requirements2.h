@@ -12,7 +12,7 @@ struct DesignSpec {
     // Mission
     double payloadKg = 180;
     double crewKg = 80;
-    double rangeKm = 1000;
+    double rangeKm = 800;
     double cruiseSpeedMs = 70;
     double cruiseAltM = 2500;
     double enduranceH = 0;
@@ -20,11 +20,11 @@ struct DesignSpec {
 
     // Performance
     double stallSpeedMs = 22;
-    double takeoffDistM = 400;
+    double takeoffDistM = 350;
     double obstacleM = 15.2;
-    double rocMs = 5;
+    double rocMs = 4;
     double climbSpeedMs = 40;
-    double maxSpeedMs = 90;
+    double maxSpeedMs = 65;
     double nTurn = 0;           // 0 = skip
     double ceilingM = 0;         // 0 = skip
     double loadFactor = 3.8;
@@ -43,8 +43,8 @@ struct DesignSpec {
     bool composite = false;
     int nSeats = 2;
     int nEngines = 1;
-    double htVolumeCoeff = 0.7;
-    double vtVolumeCoeff = 0.04;
+    double htVolumeCoeff = 0.4;
+    double vtVolumeCoeff = 0.03;
     double muRoll = 0.04;
     double muBrake = 0.5;
 };

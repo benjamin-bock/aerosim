@@ -100,7 +100,7 @@ void NacaAirfoil::compute2DAero() {
 
     // Empirical CLmax: base for t/c in 0.09-0.15 band, corrected by camber
     double tcRef = tc_ / 0.12;
-    double base = 1.25 * std::sqrt(std::max(tcRef, 0.4));
+    double base = 1.42 * std::sqrt(std::max(tcRef, 0.4));
     double camberTerm = 11.0 * camberMax_;
     if (family_ == 6) camberTerm = 10.0 * camberMax_ + 0.05 * clDesign_;
     clMax_ = std::min(base + camberTerm, 2.0);
