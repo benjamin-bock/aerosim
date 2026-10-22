@@ -15,7 +15,6 @@ int main() {
     const double power_real = 120;     // kW (160 hp)
     const double vstall_real = 26.0;   // m/s clean ~ 49 kt CAS (50.5 kt)
     const double range_real = 1150;    // km with 53 gal usable, ~ profile dependent
-    const double cruise_real = 60;     // m/s (122 ktas)
     const double ceiling_real = 4210;  // m (13,800 ft)
 
     // Spec the tool to the 172 mission
