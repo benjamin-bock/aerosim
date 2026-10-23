@@ -91,10 +91,12 @@ AeroResult aeroAnalysis(const Geometry& g, const NacaAirfoil& foil,
     cd0 *= 1.03;
     // Nacelle/engine cooling & misc drag
     cd0 += 0.003;
-    // Fixed landing gear: large parasite (Raymer 12.30; calibrated so that a
-    // Cessna-172-class design lands at CD0 ~ 0.032)
+    // Fixed landing gear (Raymer 12.30): drag AREA f_gear ∝ sqrt(W) (tire/strut
+    // size grows slowly with weight), so CD0_gear = f/S decays like W^-0.5/S.
+    // For a GA wing loading band this is ~0.006-0.010; use sqrt(S) form but
+    // normalized to stay bounded: CD0_gear = 0.006 * (S/16)^-0.15.
     if (fixedGear)
-        cd0 += 0.0080 * std::sqrt(g.wingArea / 16.0);
+        cd0 += 0.0065 * std::pow(std::max(g.wingArea, 4.0) / 16.0, -0.15);
     // Wing struts & cabane (braced high-wing GA)
     cd0 += 0.0025;
     // Cowling/engine-cooling exit, wheel fairing imperfections

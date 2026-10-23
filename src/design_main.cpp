@@ -234,6 +234,13 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(1);
     std::cout << (r.converged ? "[converged] " : "[NOT converged] ")
               << "after " << r.iterations << " iterations\n";
+    if (!r.converged) {
+        std::cout << "\n  *** The weight loop did not close. This usually means the\n"
+                  << "  *** requirements are mutually very demanding for this size\n"
+                  << "  *** (e.g. a low stall speed forcing a huge wing on a heavy\n"
+                  << "  *** aircraft). The best iterate is reported below.\n"
+                  << "  *** Tips: raise -vs, lengthen -to, or reduce -roc/-vmax.\n\n";
+    }
     std::cout << "  W0 = " << r.w0Kg << " kg | We = " << r.weights.totalEmptyKg
               << " kg | Wf = " << r.wfKg << " kg\n";
     std::cout << "  S = " << r.wingArea << " m², b = " << r.span << " m (AR "

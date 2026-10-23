@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdio>
 #include <algorithm>
 #include "../include/synthesis.h"
 #include "../include/stability.h"
@@ -19,7 +20,17 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
     double powerKW = 0.0;
 
     const int maxIter = 80;
-    double relax = 0.6;
+    double relax = 0.35;
+    // secant (Aitken) acceleration on the scalar fixed point w0 = F(w0),
+    // with bracketing: if the residual sign flips we know the root is between
+    // the last two iterates, so we bisect instead of overshooting again.
+    bool havePrev = false;
+    double prevW0 = 0.0, prevResidual = 0.0;
+    double bracketLo = 0.0, bracketHi = 0.0;
+    bool haveBracket = false;
+    double bestW0 = 1e18;
+    SynthesisResult bestRes;
+    double lastW0 = w0, lastDelta = 0.0;
     for (int it = 0; it < maxIter; ++it) {
         // 1) Geometry from W0 and stall requirement
         double clmaxTO; // computed below from aero of previous pass; first pass estimate
@@ -132,12 +143,10 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
             continue;
         }
         double err = std::fabs(w0New - w0) / std::max(w0, 1.0);
-        w0 = relax * w0New + (1.0 - relax) * w0;
-        // cap growth per iteration to avoid runaway fixed-point amplification
-        if (w0 > 2.0 * res.w0History.front() && w0 > 5000.0) {
-            relax = std::max(0.15, relax * 0.6);
-        }
+        // fill result with this iteration's state BEFORE any bookkeeping
         fuelKg = fuelNew;
+        res.wfKg = fuelNew;
+        res.w0Kg = w0New;
         res.geo = geo;
         res.aero = aero;
         res.weights = wr;
@@ -150,12 +159,60 @@ SynthesisResult synthesizeDesign(const DesignSpec& spec) {
         res.engineIdx = engIdx;
         res.governingConstraint = gov;
         res.iterations = it + 1;
+
+#ifdef SYNTH_DEBUG
+        std::fprintf(stderr, "it%d w0=%.1f -> w0New=%.1f powerKW=%.1f fuel=%.1f gov=%s\n", it, w0, w0New, powerKW, fuelNew, gov ? gov : "?");
+#endif
+        if (w0New < bestW0) {
+            bestW0 = w0New;
+            bestRes = res;
+        }
         if (err < 0.001) { res.converged = true; break; }
+
+        // Divergence detection: accelerating growth means a runaway loop
+        // (e.g. requirements physically impossible) — bail out with best iterate
+        double delta = w0New - w0;
+        if (it > 5 && w0New > 1.2 * w0 && delta > 1.1 * lastDelta) {
+            res = bestRes;
+            res.converged = false;
+            res.iterations = it + 1;
+            break;
+        }
+        lastDelta = delta;
+
+        double residual = w0New - w0;
+        double next;
+        bool signFlip = havePrev && (residual > 0) != (prevResidual > 0)
+                        && std::fabs(residual) > 1e-6;
+        if (signFlip) {
+            // root bracketed between prevW0 and w0
+            if (!haveBracket) { bracketLo = std::min(prevW0, w0); bracketHi = std::max(prevW0, w0); haveBracket = true; }
+            bracketLo = std::min(bracketLo, std::min(prevW0, w0));
+            bracketHi = std::max(bracketHi, std::max(prevW0, w0));
+            next = 0.5 * (bracketLo + bracketHi);
+        } else if (havePrev && std::fabs(w0 - prevW0) > 1e-9) {
+            double slope = (w0New - (prevW0 + prevResidual)) / (w0 - prevW0);
+            if (slope > -0.5 && slope < 1.5 && std::fabs(slope - 1.0) > 0.05) {
+                next = w0 - residual / (slope - 1.0);
+                double step = next - w0;
+                if (step > 0.15 * w0) next = w0 + 0.15 * w0;
+                if (step < -0.15 * w0) next = w0 - 0.15 * w0;
+                if (haveBracket) next = std::min(std::max(next, bracketLo), bracketHi);
+            } else {
+                next = relax * w0New + (1.0 - relax) * w0;
+            }
+        } else {
+            next = relax * w0New + (1.0 - relax) * w0;
+        }
+        prevW0 = w0; prevResidual = residual; havePrev = true;
+        w0 = std::max(50.0, next);
     }
 
-    res.w0Kg = w0;
+    // On divergence we returned bestRes inside the loop; on convergence res is
+    // already the final state. Sync the scalar summary from the stored fields.
+    res.w0Kg = res.weights.totalEmptyKg + spec.crewKg + spec.payloadKg + res.wfKg;
+    if (!std::isfinite(res.w0Kg) || res.w0Kg <= 0.0) res.w0Kg = w0;
     res.weKg = res.weights.totalEmptyKg;
-    res.wfKg = fuelKg;
     res.aspectRatio = spec.aspectRatio;
 
     // Final performance analysis with converged numbers

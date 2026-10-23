@@ -123,16 +123,22 @@ PerformanceResult analyzePerformance(const AeroResult& a, const Geometry& g,
         // Numerical integration of ground roll with T = P*eta/V
         double v = 0.5, x = 0, dt = 0.02;
         double m = in.w0Kg;
-        while (v < vLO && x < 3000.0) {
+        int steps = 0, maxSteps = 200000;
+        bool reached = false;
+        while (v < vLO && x < 5000.0 && steps < maxSteps) {
             double tAvail = thrustAvailable(in, std::max(v, 5.0), 0.0);
             double q = 0.5 * RHO0 * v * v;
             double lift = q * S * cl;
             double dGround = q * S * cd;
             double fric = in.muRoll * std::max(W - lift, 0.0);
             double acc = (tAvail - dGround - fric) / m;
+            if (acc <= 0.0) break; // underpowered: cannot accelerate
             v += acc * dt;
             x += v * dt;
+            ++steps;
         }
+        reached = v >= vLO;
+        if (!reached) { r.takeoffDistM = 1e9; } // cannot take off with this power
         // climb to obstacle: gamma from excess thrust at vLO
         double tAvailLO = thrustAvailable(in, vLO, 0.0);
         double gamma = std::max(0.02, (tAvailLO - d) / W);

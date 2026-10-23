@@ -79,10 +79,15 @@ WeightResult componentWeights(const Geometry& g, const WeightInputs& in) {
     if (!in.retractGear) { mainGearLb *= (5.7 - 0.7) / 5.7; noseGearLb *= (5.7 - 0.7) / 5.7; }
     w.gearKg = (mainGearLb + noseGearLb) * lb2kg;
 
-    // Engines installed (Raymer 15.54): 2.575 * massPerEngine^0.922 * N
-    // mass per engine from selected engine db handled by caller (wi.engineMassKg)
-    w.engineKg = 2.575 * std::pow(std::max(in.engineMassKg, 20.0) * LB_PER_KG, 0.922)
-               * in.nEngines * lb2kg;
+    // Engines installed (Raymer 15.54): 2.575 * massPerEngine^0.922 * N.
+    // The 2.575 factor includes prop+mount for light pistons; for heavy
+    // engines the installed multiplier shrinks (real: ~1.4-1.6x dry for
+    // turboprops). Blend: small engines -> 2.575, large -> 1.5.
+    double dryKg = std::max(in.engineMassKg, 20.0);
+    // Raymer 15.54 evaluated: ~1.8x dry for light pistons (includes prop,
+    // mount, cowling), shrinking to ~1.4x for large turboprops.
+    double instFactor = 1.8 - std::min(1.0, dryKg / 500.0) * 0.4; // 1.8 -> 1.4
+    w.engineKg = instFactor * dryKg * in.nEngines;
 
     // Fuel system (Raymer 15.55): 2.49 * Vgal^0.726 * (1+fint)^-0.363 * Ntanks^0.242 * Neng^0.157
     double volGal = in.fuelKg / 0.72 / 3.785; // avgas 0.72 kg/L
