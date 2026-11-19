@@ -160,3 +160,31 @@ double Atmosphere::dynamicPressure(double geometricAltitude, double speed) const
 }
 
 }  // namespace aerosim
+
+Atmosphere isaAt(double altitudeM) {
+    const aerosim::Atmosphere atmosphere;
+    Atmosphere result;
+    result.temperature = atmosphere.temperature(altitudeM);
+    result.pressure = atmosphere.pressure(altitudeM);
+    result.density = atmosphere.density(altitudeM);
+    result.soundSpeed = atmosphere.speedOfSound(altitudeM);
+    result.viscosity = 1.458e-6 * std::pow(result.temperature, 1.5)
+                     / (result.temperature + 110.4);
+    return result;
+}
+
+double isaDensity(double altitudeM) {
+    return isaAt(altitudeM).density;
+}
+
+double isaPressure(double altitudeM) {
+    return isaAt(altitudeM).pressure;
+}
+
+double isaTemperature(double altitudeM) {
+    return isaAt(altitudeM).temperature;
+}
+
+double isaSoundSpeed(double altitudeM) {
+    return isaAt(altitudeM).soundSpeed;
+}

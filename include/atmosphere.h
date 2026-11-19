@@ -152,4 +152,19 @@ private:
 
 }  // namespace aerosim
 
+// Legacy PlaneDesign/rocket compatibility API.
+struct Atmosphere {
+    double temperature;
+    double pressure;
+    double density;
+    double soundSpeed;
+    double viscosity;
+};
+
+Atmosphere isaAt(double altitudeM);
+double isaDensity(double altitudeM);
+double isaPressure(double altitudeM);
+double isaTemperature(double altitudeM);
+double isaSoundSpeed(double altitudeM);
+
 #endif  // AEROSIM_ATMOSPHERE_H
