@@ -1,14 +1,25 @@
-# Directory paths
+# AeroSim Makefile
+# Targets:
+#   make        - build the simulator
+#   make run    - build + simulate with ARGS + plot the telemetry
+#   make test   - build and run the physics verification suite
+#   make clean  - remove build artifacts and outputs
+
 SRC_DIR = src
 INC_DIR = include
 OBJ_DIR = build
 OUT_DIR = output
 SCRIPT_DIR = scripts
 
-# Executable target
-TARGET = $(OBJ_DIR)/aerosim
+# The test executable is built from test_physics.cpp only, so the main
+# target must not try to link it (it has its own main()).
+MAIN_SRCS = $(SRC_DIR)/main.cpp $(SRC_DIR)/config.cpp $(SRC_DIR)/atmosphere.cpp $(SRC_DIR)/rocket.cpp
+MAIN_OBJS = $(MAIN_SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+TEST_SRC = $(SRC_DIR)/test_physics.cpp
 
-# Compiler and flags
+TARGET = $(OBJ_DIR)/aerosim
+TEST_TARGET = $(OBJ_DIR)/test_physics
+
 CXX = g++
 CXXFLAGS = -I$(INC_DIR) -Wall -Wextra -std=c++17 -O3 -MMD -MP
 
@@ -17,19 +28,18 @@ SRCS = $(wildcard $(SRC_DIR)/*.cpp)
 OBJS = $(SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 PD_TARGET = $(OBJ_DIR)/planedesign
 PYTHON = ./.venv/bin/python3
-PLOT_SCRIPT = scripts/plot_results.py
+PLOT_SCRIPT = $(SCRIPT_DIR)/plot_results.py
 CSV = $(OUT_DIR)/flight_data.csv
 PNG = $(OUT_DIR)/flight_data.png
 
-# Arguments for the simulation
+# Extra arguments passed to the simulator, e.g.:
+#   make run ARGS="-m 80 -t 6000"
 ARGS =
-
-# --- RULES ---
 
 all: $(TARGET)
 
 # Compile the executable
-ROCKET_OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/environment.o $(OBJ_DIR)/rocket.o
+ROCKET_OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/config.o $(OBJ_DIR)/atmosphere.o $(OBJ_DIR)/rocket.o
 PLANE_OBJS = $(OBJ_DIR)/naca.o $(OBJ_DIR)/atmosphere.o $(OBJ_DIR)/geometry.o \
              $(OBJ_DIR)/aero.o $(OBJ_DIR)/weights.o $(OBJ_DIR)/constraints.o \
              $(OBJ_DIR)/engines.o $(OBJ_DIR)/performance.o $(OBJ_DIR)/synthesis.o \
@@ -43,7 +53,6 @@ $(TARGET): $(ROCKET_OBJS)
 	$(CXX) $(ROCKET_OBJS) -o $(TARGET)
 	@echo "Compilation finished: $(TARGET)"
 
-# Compile object files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -56,12 +65,13 @@ DEPS = $(OBJS:.o=.d)
 	@mkdir -p $(OBJ_DIR)
 	@$(CXX) $(CXXFLAGS) -MM -MT $(OBJ_DIR)/$*.o $< > $@
 
-# Rule to run everything at once
+# Run the rocket simulator
 run: $(TARGET)
-	@echo "Launching simulation..."
-	./$(TARGET) ${ARGS}
-	@echo "Generating plot..."
-	$(PYTHON) $(PLOT_SCRIPT) $(CSV) $(PNG)
+	@mkdir -p $(OUT_DIR)
+	@echo "Running simulation..."
+	./$(TARGET) $(ARGS)
+	@test -x "$(PYTHON)" || echo "Note: .venv/bin/python3 not found; skipping plot. Create it or run: python3 $(PLOT_SCRIPT) $(CSV) $(PNG)"
+	@if test -x "$(PYTHON)"; then $(PYTHON) $(PLOT_SCRIPT) $(CSV) $(PNG); fi
 
 # Aircraft conceptual design tool
 design: $(PD_TARGET)
@@ -75,12 +85,6 @@ $(PD_TARGET): $(PLANE_OBJS)
 	$(CXX) $(PLANE_OBJS) -o $(PD_TARGET)
 	@echo "Built: $(PD_TARGET)"
 
-# Unit tests
-test: $(TEST_OBJS)
-	@mkdir -p $(OBJ_DIR)
-	$(CXX) $(TEST_OBJS) -o $(OBJ_DIR)/tests -lm
-	./$(OBJ_DIR)/tests
-
 # Calibration against Cessna 172
 calibrate: $(OBJ_DIR)/calibration.o $(PLANE_OBJS:$(OBJ_DIR)/design_main.o=)
 	@mkdir -p $(OBJ_DIR)
@@ -90,6 +94,18 @@ calibrate: $(OBJ_DIR)/calibration.o $(PLANE_OBJS:$(OBJ_DIR)/design_main.o=)
 # Cleanup
 clean:
 	rm -rf $(OBJ_DIR) $(OUT_DIR)
-	@echo "Directories build/ and output/ cleaned."
+	@echo "Cleaned build/ and output/."
+
+# Rocket and aircraft unit tests
+test: $(TARGET) $(TEST_TARGET) $(TEST_OBJS)
+	./$(TEST_TARGET)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(TEST_OBJS) -o $(OBJ_DIR)/tests -lm
+	./$(OBJ_DIR)/tests
+
+$(TEST_TARGET): $(TEST_SRC) $(TARGET)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INC_DIR) $(TEST_SRC) $(filter-out $(OBJ_DIR)/main.o,$(MAIN_OBJS)) -o $@
+	@echo "Built test suite: $@"
 
 .PHONY: all clean run design test calibrate
